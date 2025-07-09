@@ -1,0 +1,117 @@
+{
+  "id": "triple-logger-flow",
+  "label": "Triple Logger Flow",
+  "type": "tab",
+  "nodes": [
+    {
+      "id": "link-in",
+      "type": "link in",
+      "z": "triple-logger-flow",
+      "name": "log_in",
+      "links": ["link-out"],
+      "x": 160,
+      "y": 140,
+      "wires": [["prepare-log"]]
+    },
+    {
+      "id": "prepare-log",
+      "type": "function",
+      "z": "triple-logger-flow",
+      "name": "prepareLog",
+      "func": "const flowSettings = global.get(\"loggerSettings\") || {};\n\nmsg._logged_at = new Date().toISOString();\n\nconst levels = ['debug', 'info', 'warn', 'error'];\nconst msgLevel = msg.level || 'info';\nconst levelIndex = levels.indexOf(msgLevel);\nconst minIndex = levels.indexOf(flowSettings.logLevel || 'info');\n\nif (levelIndex < minIndex) return null;\n\nlet shouldLog = true;\nif (flowSettings.filterExpression) {\n  const jexl = global.get(\"jexl\");\n  try {\n    shouldLog = await jexl.eval(flowSettings.filterExpression, msg);\n  } catch (e) {\n    node.warn(\"Ошибка в выражении фильтрации: \" + e.message);\n    shouldLog = false;\n  }\n  if (!shouldLog) return null;\n}\n\nlet filtered = {};\nconst fields = (flowSettings.fieldsToLog || \"\").split(',').map(x => x.trim());\n\nif (fields.length && fields[0] !== \"\") {\n  fields.forEach(k => {\n    if (msg.hasOwnProperty(k)) filtered[k] = msg[k];\n  });\n} else {\n  filtered = { ...msg };\n}\nfiltered._logged_at = msg._logged_at;\nmsg._logPayload = filtered;\nreturn msg;",
+      "outputs": 1,
+      "x": 340,
+      "y": 140,
+      "wires": [["log-to-file", "log-to-http", "log-to-mongo", "log-status"]]
+    },
+    {
+      "id": "log-to-file",
+      "type": "file",
+      "z": "triple-logger-flow",
+      "name": "Log to File",
+      "filename": "/tmp/triple-log.json",
+      "appendNewline": true,
+      "overwriteFile": "false",
+      "encoding": "utf8",
+      "x": 580,
+      "y": 60,
+      "wires": [[]]
+    },
+    {
+      "id": "log-to-http",
+      "type": "http request",
+      "z": "triple-logger-flow",
+      "name": "Log to HTTP",
+      "method": "POST",
+      "ret": "txt",
+      "url": "https://api.example.com/logs",
+      "x": 580,
+      "y": 140,
+      "wires": [[]]
+    },
+    {
+      "id": "log-to-mongo",
+      "type": "mongodb out",
+      "z": "triple-logger-flow",
+      "name": "Log to MongoDB",
+      "collection": "messages",
+      "x": 580,
+      "y": 220,
+      "wires": [[]]
+    },
+    {
+      "id": "log-status",
+      "type": "function",
+      "z": "triple-logger-flow",
+      "name": "Update Status",
+      "func": "flow.set(\"lastLogAt\", msg._logged_at);\nflow.set(\"logCount\", (flow.get(\"logCount\") || 0) + 1);\nreturn null;",
+      "outputs": 1,
+      "x": 580,
+      "y": 300,
+      "wires": [[]]
+    },
+    {
+      "id": "inject-clean",
+      "type": "inject",
+      "z": "triple-logger-flow",
+      "name": "Daily Cleanup",
+      "repeat": "86400",
+      "once": true,
+      "onceDelay": "10",
+      "x": 160,
+      "y": 400,
+      "wires": [["auto-clean"]]
+    },
+    {
+      "id": "auto-clean",
+      "type": "function",
+      "z": "triple-logger-flow",
+      "name": "Auto Clean",
+      "func": "const n = flow.get(\"logRetentionDays\") || 7;\nconst cutoff = new Date();\ncutoff.setDate(cutoff.getDate() - n);\n\nmsg.payload = {\n  _logged_at: { \"$lt\": cutoff.toISOString() }\n};\n\nmsg.operation = \"delete\";\nreturn msg;",
+      "outputs": 1,
+      "x": 340,
+      "y": 400,
+      "wires": [["clean-mongo"]]
+    },
+    {
+      "id": "clean-mongo",
+      "type": "mongodb out",
+      "z": "triple-logger-flow",
+      "name": "Delete Old Logs",
+      "collection": "messages",
+      "x": 580,
+      "y": 400,
+      "wires": [[]]
+    },
+    {
+      "id": "link-out",
+      "type": "link out",
+      "z": "triple-logger-flow",
+      "name": "log_out",
+      "links": ["link-in"],
+      "x": 460,
+      "y": 40,
+      "wires": [[]]
+    }
+  ]
+}
